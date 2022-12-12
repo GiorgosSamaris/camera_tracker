@@ -11,6 +11,7 @@ config = configparser.ConfigParser()
 def empty(a):
     pass
 
+
 def stackImages(scale,imgArray):
     rows = len(imgArray)
     cols = len(imgArray[0])
@@ -43,6 +44,16 @@ def stackImages(scale,imgArray):
     return ver
 
 
+def findContours(img,threshold):
+    imgGray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    #imgBlur = cv2.GaussianBlur(imgGray, (7, 7), 1)
+    #imgCanny = cv2.Canny(imgBlur,100,200)
+    thresh, binary = cv2.threshold(imgGray,threshold,255, cv2.THRESH_BINARY)
+    contours, hierarchy = cv2.findContours(binary,cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+    print("number of contours " + str(len(contours)))
+    return contours
+
+
 class CameraCalibraion:
     def __init__(self) -> None:
         #get scripts directory path
@@ -52,9 +63,13 @@ class CameraCalibraion:
         config.read(self.config_path)
         
     def colorCalibration(self)->None:
+
+        #init cap device
         cap = cv2.VideoCapture(0)
         cv2.namedWindow("TrackBars")
         cv2.resizeWindow("TrackBars",640,240)
+
+        #set init values for trackbars from the config file
         cv2.createTrackbar("Hue Min","TrackBars",int(config["Lower"]["hue"]),179,empty)
         cv2.createTrackbar("Hue Max","TrackBars",int(config["Upper"]["hue"]),179,empty)
         cv2.createTrackbar("Sat Min","TrackBars",int(config["Lower"]["saturation"]),255,empty)
@@ -64,7 +79,7 @@ class CameraCalibraion:
 
 
 
-
+        #capture video frame by frame
         while cap.isOpened():
             ret, img = cap.read()
             if ret == True:
@@ -97,14 +112,72 @@ class CameraCalibraion:
                     with open(self.config_path,'w') as configFile:
                         config.write(configFile)
                     break
+        cap.release()
+        cv2.destroyAllWindows()
+
+
 
 class ColorDetecion:
     def __init__(self) -> None:
-        pass
+        #get scripts directory path
+        self.config_path = os.path.dirname( sys.argv[0])+"/config.ini"
+        
+        #read config file to load preferences
+        config.read(self.config_path)
+        
+        
+        #load preferences from config file
+        self.lower_range = (int(config["Lower"]["hue"]), int(config["Lower"]["saturation"]), int(config["Lower"]["value"]))
+        self.upper_range = (int(config["Upper"]["hue"]), int(config["Upper"]["saturation"]), int(config["Upper"]["value"]))
+        print(self.lower_range)
+
+
+
+
+    def detectColorInFrame(self, frame) -> tuple:
+        #list of object centroids in the current frame
+        #centroids = []
+        best_area = 0
+        center = (0, 0)
+        whiteImage = np.full((frame.shape[0], frame.shape[1], 3), 255, np.uint8)
+
+        #switch to csv color space
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        #create a mask for the detected color
+        mask = cv2.inRange(hsv, self.lower_range, self.upper_range)
+        imgSum = cv2.bitwise_and(whiteImage, whiteImage, mask=mask)
+
+        #find contours based on the mask
+        contours = findContours(imgSum, 60)
+
+        #find the centroid for each contour
+        for cnt in contours:
+            M = cv2.moments(cnt)
+            x, y, width, height = cv2.boundingRect(cnt)
+            
+
+            
+
+            if width * height > best_area:
+                best_area = width * height
+                cntr_x = x + width/2
+                cntr_y = y + height/2
+                center = (cntr_x, cntr_y)
+                cv2.rectangle(imgSum, (x, y), (x + width, y + height), (0, 255, 0), 2)
+
+            
+
+        return center,imgSum
+
+
+    
+
 
 class ObjectDetection:
     def __init__(self) -> None:
         pass
+
 
     
 
@@ -113,7 +186,17 @@ class ObjectDetection:
 def main():
     calibration = CameraCalibraion()
     calibration.colorCalibration()
+    colordetection = ColorDetecion()
 
+    cap = cv2.VideoCapture(0)
+    while cap.isOpened():
+            ret, frame = cap.read()
+            if ret == True:
+                cntr, resframe = colordetection.detectColorInFrame(frame)
+                print(cntr)
+                cv2.imshow("tracked object",resframe)
+                if cv2.waitKey(1) & 0xFF ==ord('q'):
+                    break
 
 
 
